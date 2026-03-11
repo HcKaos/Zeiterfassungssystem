@@ -36,6 +36,7 @@ const session = require("express-session");
 const path = require("path");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
+const csrf = require("csurf");
 require("dotenv").config();
 
 const app = express();
@@ -90,6 +91,41 @@ app.use(session({
         maxAge: 24 * 60 * 60 * 1000
     }
 }));
+
+// CSRF protection
+const csrfProtection = csrf();
+
+// Exclude auth routes from CSRF so clients can obtain a token after login/register
+const csrfExclusionRoutes = [
+    { method: "POST", path: "/api/auth/login" },
+    { method: "POST", path: "/api/auth/register" }
+];
+
+app.use((req, res, next) => {
+    const method = req.method.toUpperCase();
+    // Only enforce CSRF for state-changing methods
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+        return next();
+    }
+    const isExcluded = csrfExclusionRoutes.some(r => r.method === method && r.path === req.path);
+    if (isExcluded) {
+        return next();
+    }
+    return csrfProtection(req, res, next);
+});
+
+// Endpoint for frontend to fetch current CSRF token
+app.get("/api/csrf-token", (req, res) => {
+    try {
+        const token = req.csrfToken();
+        res.json({ csrfToken: token });
+    } catch (e) {
+        // If there is no session yet, create one and then issue a token
+        return csrfProtection(req, res, () => {
+            res.json({ csrfToken: req.csrfToken() });
+        });
+    }
+});
 
 // Request logging (only in development)
 if (process.env.NODE_ENV !== 'production') {
